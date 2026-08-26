@@ -34,19 +34,39 @@
 
 ## 快速啟動
 
-目前僅能執行可行性驗證腳本。
-
 ```bash
-# 1. 下載勞動部原始資料（約 16.5 MB）
+# 1. 安裝（含測試相依）
+pip install -e ".[dev]"
+
+# 2. 跑測試
+pytest
+
+# 3. 下載勞動部原始資料（約 16.5 MB）
 curl -o data/lsa_violations_raw.csv \
   https://apiservice.mol.gov.tw/OdService/download/A17000000J-030225-svj
 
-# 2. 執行名稱比對驗證
-python spike/01_name_matching_spike.py
-
-# 3. 執行資料品質追查
-python spike/02_followups.py
+# 4. 拿全量資料驗收名稱模組
+python scripts/audit_names.py
 ```
+
+### 使用名稱正規化模組
+
+```python
+from twec.names import normalize, split_entity
+
+split_entity(normalize("優志旺股份有限公司(渡&#37001;剛德)"))
+# EntityName(org='優志旺股份有限公司', person='渡邉剛德', kind='company', related_org=None, site=None)
+
+split_entity(normalize("友達光電股份有限公司台中廠"))
+# EntityName(org='友達光電股份有限公司', person=None, kind='company', related_org=None, site='台中廠')
+
+split_entity(normalize("中華航空股份有限公司企業工會"))
+# EntityName(org='中華航空股份有限公司企業工會', person=None, kind='union',
+#            related_org='中華航空股份有限公司', site=None)
+```
+
+`org` 是歸戶用的 key。工會依工會法是獨立法人，不併入母公司，改以 `related_org` 標註關聯；
+廠區與分公司屬同一法人，併入母公司並以 `site` 保留明細。
 
 Windows PowerShell 下載改用：
 
@@ -67,12 +87,20 @@ tw-employer-check/
 ├── CHANGELOG.md           版本變更記錄
 ├── 可行性調查.md           資料源盤點、前案調查、實測結果（核心文件）
 ├── 交接文件.md             冷啟動用：目前進度、待辦、已知坑
+├── pyproject.toml         套件與測試設定
+├── twec/                  正式模組（核心邏輯，不綁 UI）
+│   └── names.py           事業單位名稱正規化與拆解
+├── tests/
+│   └── test_names.py      twec.names 的行為規格
+├── scripts/
+│   └── audit_names.py     拿全量資料驗收名稱模組
 ├── data/                  原始 CSV 不進版控，衍生產出進版控
 │   ├── lsa_violations_raw.csv      勞動部原始資料（16.5 MB）
+│   ├── raw/                        其餘 7 個資料集（不進版控）
 │   ├── brand_alias_shortlist.csv   442 家分桶結果
 │   ├── unknowns_triage.csv         待查公司縣市分診
 │   └── 品牌別名核對表.xlsx          人工核對用
-└── spike/                 拋棄式驗證腳本，驗證完應重寫
+└── spike/                 拋棄式驗證腳本，已凍結不再維護
     ├── 01_name_matching_spike.py    名稱比對可行性
     ├── 02_followups.py              資料品質追查
     ├── 03_brand_alias_shortlist.py  442 家分桶
@@ -117,4 +145,5 @@ tw-employer-check/
 
 | 套件 | 用途 |
 |---|---|
-| pandas | 資料載入、正規化、聚合分析 |
+| pandas | 資料載入、聚合分析 |
+| pytest | 測試（開發用） |
