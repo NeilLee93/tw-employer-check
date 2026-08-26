@@ -2,8 +2,8 @@
 
 查詢台灣雇主的勞動法違規紀錄，並用勞動法視角判讀「這代表什麼」。給求職者、人資與勞動法工作者使用。
 
-> **目前狀態：實作起步。** 名稱正規化模組（`twec/names.py`）已完成並通過全量驗收，
-> 其餘功能尚未實作。`spike/` 內為拋棄式驗證腳本，不再維護。
+> **目前狀態：實作起步。** 名稱正規化（`twec/names.py`）與統一編號補齊（`twec/uniform_no.py`）
+> 兩個模組已完成並通過全量驗收，其餘功能尚未實作。`spike/` 內為拋棄式驗證腳本，不再維護。
 > 驗證結論見 [`可行性調查.md`](可行性調查.md)，進度與待辦見 [`交接文件.md`](交接文件.md)。
 
 ---
@@ -47,6 +47,14 @@ curl -o data/lsa_violations_raw.csv \
 
 # 4. 拿全量資料驗收名稱模組
 python scripts/audit_names.py
+
+# 5.（選用）下載財政部稅籍三檔以補統一編號，解開後約 380 MB
+curl -o data/raw/fia_BGMOPEN1.zip  https://eip.fia.gov.tw/data/BGMOPEN1.zip
+curl -o data/raw/fia_BGMOPEN1X.csv https://eip.fia.gov.tw/data/BGMOPEN1X.csv
+curl -o data/raw/fia_BGMOPEN1Y.csv https://eip.fia.gov.tw/data/BGMOPEN1Y.csv
+# zip 內檔名為 BGMOPEN1.csv，需更名為 fia_BGMOPEN1.csv
+
+python scripts/build_uniform_no.py
 ```
 
 ### 使用名稱正規化模組
@@ -67,6 +75,27 @@ split_entity(normalize("中華航空股份有限公司企業工會"))
 
 `org` 是歸戶用的 key。工會依工會法是獨立法人，不併入母公司，改以 `related_org` 標註關聯；
 廠區與分公司屬同一法人，併入母公司並以 `site` 保留明細。
+
+### 補統一編號
+
+```python
+from twec.uniform_no import Registry
+
+registry = Registry.from_dir("data/raw")     # 讀 389 萬列稅籍資料，約 2 分鐘
+
+registry.resolve("和德昌股份有限公司").uniform_no
+# '12411160'
+
+registry.resolve("香港商世界健身事業有限公司")
+# Resolution(uniform_no='27940499', method='hq_via_prefix', ...)
+# 外商母公司無台灣稅籍，經各分公司的「總機構統一編號」指回在台總機構
+
+registry.resolve("交通部台灣鐵路管理局").uniform_no
+# None —— 政府機關沒有營業稅籍，查不到就不給，不猜
+```
+
+統編是加值欄位，**不取代 `org`**。勞基法資料裡 79.4% 的事業單位補得上，
+補不上的多為政府機關、公立學校醫院與聯合會計師事務所，名稱字串仍是備援 key。
 
 Windows PowerShell 下載改用：
 
@@ -89,14 +118,18 @@ tw-employer-check/
 ├── 交接文件.md             冷啟動用：目前進度、待辦、已知坑
 ├── pyproject.toml         套件與測試設定
 ├── twec/                  正式模組（核心邏輯，不綁 UI）
-│   └── names.py           事業單位名稱正規化與拆解
+│   ├── names.py           事業單位名稱正規化與拆解
+│   └── uniform_no.py      用財政部稅籍資料補統一編號
 ├── tests/
-│   └── test_names.py      twec.names 的行為規格
+│   ├── test_names.py      twec.names 的行為規格
+│   └── test_uniform_no.py twec.uniform_no 的行為規格
 ├── scripts/
-│   └── audit_names.py     拿全量資料驗收名稱模組
+│   ├── audit_names.py     拿全量資料驗收名稱模組
+│   └── build_uniform_no.py 全量比對統編，產出對照表
 ├── data/                  原始 CSV 不進版控，衍生產出進版控
 │   ├── lsa_violations_raw.csv      勞動部原始資料（16.5 MB）
-│   ├── raw/                        其餘 7 個資料集（不進版控）
+│   ├── raw/                        其餘 7 個資料集＋財政部稅籍三檔（不進版控）
+│   ├── uniform_no_map.csv          org → 統編對照表（不進版控，可重生）
 │   ├── brand_alias_shortlist.csv   442 家分桶結果
 │   ├── unknowns_triage.csv         待查公司縣市分診
 │   └── 品牌別名核對表.xlsx          人工核對用
@@ -125,16 +158,26 @@ tw-employer-check/
 | 166670 | 工會法 | 不定期 |
 | 155978 | 職業安全衛生法（職安署） | 每 1 日 |
 
-授權：政府資料開放授權條款－第 1 版。使用時須標示：
+補統一編號另用財政部財政資訊中心資料：
+
+| dataset_id | 名稱 | 列數 | 更新頻率 |
+|---|---|---:|---|
+| 9400 | 全國營業(稅籍)登記資料集（營業中） | 171 萬 | 每 1 日 |
+| 75140 | 全國營業(稅籍)登記(停業)資料集 | 12 萬 | 每 1 日 |
+| 75141 | 全國營業(稅籍)登記(停業以外之非營業中)資料集 | 206 萬 | 每 1 月 |
+
+授權：兩邊皆為政府資料開放授權條款－第 1 版。使用時須標示：
 
 > 資料來源：勞動部「違反勞動法令事業單位」開放資料（data.gov.tw）
+> 資料來源：財政部財政資訊中心「全國營業(稅籍)登記資料集」（data.gov.tw）
 
 ---
 
 ## 注意事項 / 已知限制
 
 - **罰鍰金額欄位 2020 年以前為空**。涉及金額的分析起點必須設在 2021 年（約 44,000 筆）；純次數分析可用 2016 年起全量。
-- **資料無統一編號欄位**，公司識別全靠名稱字串比對。
+- **資料無統一編號欄位**。已用財政部稅籍資料補上 79.4%，補不上的 20.6% 是結構性的
+  （政府機關、公立學校醫院、聯合會計師事務所本體無營業稅籍），名稱字串仍是備援 key。
 - **品牌名 ≠ 法人名**，需人工維護對照表，否則知名連鎖品牌會嚴重漏報。
 - **裁處未確定亦可能公布**（資料中可見「行政救濟中」「訴願駁回」等備註），查詢結果須據實標示狀態，不得逕稱該公司「違法」。
 - 資料含負責人姓名，屬政府依法公布事項；若對外發布本工具，二次利用範圍須再行確認。

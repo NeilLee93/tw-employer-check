@@ -1,6 +1,7 @@
 # 原始資料：可用 README 的指令重新下載，不進版控
 data/lsa_violations_raw.csv
 data/raw/
+data/uniform_no_map.csv
 
 # Python
 __pycache__/
