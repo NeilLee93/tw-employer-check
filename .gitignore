@@ -1,0 +1,11 @@
+# 原始資料：16.5 MB，可用 README 的指令重新下載，不進版控
+data/lsa_violations_raw.csv
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Excel 暫存
+~$*.xlsx
