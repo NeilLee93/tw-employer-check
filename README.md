@@ -152,7 +152,8 @@ tw-employer-check/
 ├── scripts/
 │   ├── audit_names.py     拿全量資料驗收名稱模組
 │   ├── build_uniform_no.py 全量比對統編，產出對照表
-│   └── build_roster.py    跑完整條歸戶主流程，產出雇主名冊
+│   ├── build_roster.py    跑完整條歸戶主流程，產出雇主名冊
+│   └── build_law_workbook.py 產出法條白話化的填寫用 Excel
 ├── data/                  原始 CSV 不進版控，衍生產出進版控
 │   ├── lsa_violations_raw.csv      勞動部原始資料（16.5 MB）
 │   ├── raw/                        其餘 7 個資料集＋財政部稅籍三檔（不進版控）
@@ -217,4 +218,5 @@ tw-employer-check/
 | 套件 | 用途 |
 |---|---|
 | pandas | 資料載入、聚合分析 |
+| openpyxl | 產出人工填寫用的 Excel |
 | pytest | 測試（開發用） |

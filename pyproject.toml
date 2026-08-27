@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tw-employer-check"
-version = "0.7.0"
+version = "0.8.0"
 description = "台灣雇主勞動法違規紀錄查詢與判讀"
 requires-python = ">=3.10"
-dependencies = ["pandas>=2.0"]
+dependencies = ["pandas>=2.0", "openpyxl>=3.1"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
