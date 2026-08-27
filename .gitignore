@@ -11,3 +11,4 @@ venv/
 
 # Excel 暫存
 ~$*.xlsx
+.gstack/
