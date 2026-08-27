@@ -2,6 +2,7 @@
 data/lsa_violations_raw.csv
 data/raw/
 data/uniform_no_map.csv
+data/roster.csv
 
 # Python
 __pycache__/

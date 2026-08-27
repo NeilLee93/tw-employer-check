@@ -19,25 +19,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from twec.names import normalize, split_entity  # noqa: E402
+from twec.roster import count_orgs  # noqa: E402
 from twec.uniform_no import Registry, Resolution  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 RAW_DIR = ROOT / "data" / "raw"
 DEFAULT_SOURCE = ROOT / "data" / "lsa_violations_raw.csv"
 OUT = ROOT / "data" / "uniform_no_map.csv"
-COL = "事業單位名稱或負責人"
-
-
-def count_orgs(source: Path) -> Counter[str]:
-    """讀違規資料，回傳 org -> 裁處列數。"""
-    counts: Counter[str] = Counter()
-    with open(source, encoding="utf-8", errors="replace", newline="") as fh:
-        for row in csv.DictReader(fh):
-            raw = row.get(COL) or ""
-            if raw:
-                counts[split_entity(normalize(raw)).org] += 1
-    return counts
 
 
 def main() -> None:

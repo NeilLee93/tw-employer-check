@@ -2,8 +2,8 @@
 
 查詢台灣雇主的勞動法違規紀錄，並用勞動法視角判讀「這代表什麼」。給求職者、人資與勞動法工作者使用。
 
-> **目前狀態：實作起步。** 名稱正規化（`twec/names.py`）與統一編號補齊（`twec/uniform_no.py`）
-> 兩個模組已完成並通過全量驗收，其餘功能尚未實作。`spike/` 內為拋棄式驗證腳本，不再維護。
+> **目前狀態：實作起步。** 歸戶主流程（`twec/names.py` → `twec/uniform_no.py` → `twec/roster.py`）
+> 已完整串起來並通過全量驗收，判讀層與 CLI 尚未實作。`spike/` 內為拋棄式驗證腳本，不再維護。
 > 驗證結論見 [`可行性調查.md`](可行性調查.md)，進度與待辦見 [`交接文件.md`](交接文件.md)。
 
 ---
@@ -94,6 +94,30 @@ registry.resolve("交通部台灣鐵路管理局").uniform_no
 # None —— 政府機關沒有營業稅籍，查不到就不給，不猜
 ```
 
+### 歸戶（一個雇主一列）
+
+```python
+from twec.roster import Roster, count_orgs
+from twec.uniform_no import Registry
+
+orgs = count_orgs("data/lsa_violations_raw.csv")   # org -> 裁處列數
+roster = Roster.build(orgs, Registry.from_dir("data/raw"))
+
+roster.of("台灣麥當勞餐廳股份有限公司")
+# Entity(key='12411160', key_kind='uniform_no', uniform_no='12411160',
+#        names=('和德昌股份有限公司', '台灣麥當勞餐廳股份有限公司'), count=22)
+
+roster.of("交通部台灣鐵路管理局").key_kind
+# 'name' —— 沒有統編就用名稱字串當 key，不與任何人合併
+
+len(roster.renamed)
+# 202 —— 統編直接指出的更名組數
+```
+
+合併規則只有一條，而且刻意保守：**只有 `high_confidence` 的統編才拿來合併**。
+`sole_operating`（同名多統編、只剩一家營業中）的統編仍寫進 `uniform_no` 當加值欄位，
+但不合併——分裂了還能靠別名表補，錯併就救不回來了。
+
 統編是加值欄位，**不取代 `org`**。勞基法資料裡 79.4% 的事業單位補得上，
 補不上的多為政府機關、公立學校醫院與聯合會計師事務所，名稱字串仍是備援 key。
 
@@ -119,17 +143,21 @@ tw-employer-check/
 ├── pyproject.toml         套件與測試設定
 ├── twec/                  正式模組（核心邏輯，不綁 UI）
 │   ├── names.py           事業單位名稱正規化與拆解
-│   └── uniform_no.py      用財政部稅籍資料補統一編號
+│   ├── uniform_no.py      用財政部稅籍資料補統一編號
+│   └── roster.py          歸戶：把 org 收斂成「一個雇主一列」
 ├── tests/
 │   ├── test_names.py      twec.names 的行為規格
-│   └── test_uniform_no.py twec.uniform_no 的行為規格
+│   ├── test_uniform_no.py twec.uniform_no 的行為規格
+│   └── test_roster.py     twec.roster 的行為規格
 ├── scripts/
 │   ├── audit_names.py     拿全量資料驗收名稱模組
-│   └── build_uniform_no.py 全量比對統編，產出對照表
+│   ├── build_uniform_no.py 全量比對統編，產出對照表
+│   └── build_roster.py    跑完整條歸戶主流程，產出雇主名冊
 ├── data/                  原始 CSV 不進版控，衍生產出進版控
 │   ├── lsa_violations_raw.csv      勞動部原始資料（16.5 MB）
 │   ├── raw/                        其餘 7 個資料集＋財政部稅籍三檔（不進版控）
 │   ├── uniform_no_map.csv          org → 統編對照表（不進版控，可重生）
+│   ├── roster.csv                  歸戶後的雇主名冊（不進版控，可重生）
 │   ├── brand_alias_shortlist.csv   442 家分桶結果
 │   ├── unknowns_triage.csv         待查公司縣市分診
 │   └── 品牌別名核對表.xlsx          人工核對用
