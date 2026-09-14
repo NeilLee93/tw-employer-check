@@ -27,6 +27,7 @@
 from __future__ import annotations
 
 import bisect
+import collections
 import csv
 import os
 import re
@@ -69,6 +70,12 @@ def normalize_law(raw: str) -> str:
 def article_of(law: str) -> int | None:
     m = re.match(r"^勞動基準法第(\d+)條", law)
     return int(m.group(1)) if m else None
+
+
+def normalize_lpa_law(raw: str) -> str:
+    """勞退法條字串全量掃過只有換行／空白雜訊（9 列），沒有勞基法那種簡稱
+    混用或尾巴重複串接法規名稱的坑，只需去空白。"""
+    return _clean(raw)
 
 
 @dataclass(frozen=True)
@@ -193,13 +200,107 @@ def parse_violation_row(row: dict[str, str]) -> list[tuple[str, str, int | None]
     return out
 
 
+def parse_osha_law_citation(raw: str) -> str:
+    """職安一列常見「子法暨母法」引用（子法授權自職安法概括義務條款），
+    使用者決定：只取子法（`暨` 前面那個，較具體的引用）代表整列。
+
+    `;` 與換行是另一種分隔符，同樣只取第一段；列首的「1.」「2.」是資料裡
+    混進來的列點標記，不是法條的一部分，一併剝掉。
+    """
+    first_segment = re.split(r"[;\n]", raw or "", maxsplit=1)[0]
+    s = re.sub(r"\s+", "", first_segment)
+    s = s.split("暨", 1)[0]
+    return re.sub(r"^\d+[.、]", "", s)
+
+
+def parse_osha_violation_row(row: dict[str, str]) -> list[tuple[str, str, int | None]] | None:
+    """職安走列層級判讀：一列 = 一筆，`違反法規內容` 整欄照登，不拆分。
+
+    跟 `parse_violation_row`／`parse_lpa_violation_row` 不同：不檢查法條數與
+    描述數是否對得上——列層級本來就只取一個法條（`parse_osha_law_citation`），
+    不需要一一配對。
+    """
+    law = parse_osha_law_citation(row.get("違法法規法條") or "")
+    if not law:
+        return None
+    text = _clean_text(row.get("違反法規內容") or "")
+    fine = (row.get("罰鍰金額") or "").strip()
+    fine_value = int(fine) if fine.isdigit() else None
+    return [(law, text, fine_value)]
+
+
+def parse_lpa_violation_row(row: dict[str, str]) -> list[tuple[str, str, int | None]] | None:
+    """勞退版的 `parse_violation_row`：欄位形狀相同，罰鍰欄位改叫「處分金額或滯納金」。"""
+    laws = (row.get("違法法規法條") or "").split(";")
+    texts = (row.get("違反法規內容") or "").split(";")
+    if len(laws) != len(texts):
+        return None
+    fine = (row.get("處分金額或滯納金") or "").strip()
+    fine_value = int(fine) if fine.isdigit() else None
+    out = []
+    for law, text in zip(laws, texts):
+        law = normalize_lpa_law(law)
+        if law:
+            out.append((law, _clean_text(text), fine_value))
+    return out
+
+
+def build_law_table_from_data(
+    raw_csv_path: str | os.PathLike[str], parse_row=parse_violation_row
+) -> dict[str, LawEntry]:
+    """勞退／職安沒有像 `scripts/build_law_workbook.py` 那樣的人工白話對照表
+    （待辦第 4 項定案：不強求填表也能跑），改直接掃一次原始 CSV 算出
+    每條法規的罰鍰中位數／平均，餵給 `build_severity_buckets`／`resolve_severity`
+    走 fallback。`plain`／`manual_severity` 永遠是 None，人工白話與嚴重度
+    等以後真的要填再另外接。
+
+    只取「整列只展開出這一條」的列計入罰鍰統計，跟工作表腳本同一個理由：
+    合併列的罰鍰無法確定歸給哪一條，硬算會誤導嚴重度。
+    """
+    fines: dict[str, list[int]] = collections.defaultdict(list)
+    texts: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
+
+    with open(raw_csv_path, encoding="utf-8", errors="replace", newline="") as fh:
+        for row in csv.DictReader(fh):
+            parsed = parse_row(row)
+            if not parsed:
+                continue
+            alone = len(parsed) == 1
+            for law, text, fine in parsed:
+                texts[law][text] += 1
+                if alone and fine:
+                    fines[law].append(fine)
+
+    table: dict[str, LawEntry] = {}
+    for law, law_texts in texts.items():
+        law_fines = fines.get(law, [])
+        table[law] = LawEntry(
+            law=law,
+            topic="",
+            plain=None,
+            manual_severity=None,
+            fine_median=statistics.median(law_fines) if law_fines else None,
+            fine_mean=statistics.mean(law_fines) if law_fines else None,
+            official_text=law_texts.most_common(1)[0][0],
+        )
+    return table
+
+
 def interpret_entity(
     entity: Entity,
     raw_csv_path: str | os.PathLike[str],
     law_table: dict[str, LawEntry],
     buckets: list[float],
+    parse_row=parse_violation_row,
+    get_article=article_of,
 ) -> InterpretedReport:
-    """查一個雇主（含所有別名）在違規名單裡的所有列，套用白話與嚴重度。"""
+    """查一個雇主（含所有別名）在違規名單裡的所有列，套用白話與嚴重度。
+
+    `parse_row`／`get_article` 讓同一套歸戶、累犯、行政救濟中邏輯可以套用在
+    不同法規的 CSV 上（勞基法用預設值；勞退傳 `parse_lpa_violation_row`；
+    職安傳 `parse_osha_violation_row`）——欄位形狀與展開規則因法規而異，但
+    「查一個雇主」這件事不變。
+    """
     aliases = set(entity.names)
     items: list[InterpretedItem] = []
     law_counter: dict[str, int] = {}
@@ -213,7 +314,7 @@ def interpret_entity(
             if split_entity(normalize_name(raw_name)).org not in aliases:
                 continue
 
-            parsed = parse_violation_row(row)
+            parsed = parse_row(row)
             if parsed is None:
                 continue
 
@@ -233,7 +334,7 @@ def interpret_entity(
                         agency=row.get("主管機關") or "",
                         case_no=row.get("處分字號") or "",
                         law=law,
-                        article=article_of(law),
+                        article=get_article(law),
                         text=display_text,
                         text_source=text_source,
                         severity=severity,

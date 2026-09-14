@@ -17,13 +17,20 @@
     統編併起來的更名組）撈違規列，不是只查單一名稱字串。
 """
 
+import csv
+
 from twec.interpret import (
     LawEntry,
     article_of,
+    build_law_table_from_data,
     build_severity_buckets,
     interpret_entity,
     load_law_table,
     normalize_law,
+    normalize_lpa_law,
+    parse_lpa_violation_row,
+    parse_osha_law_citation,
+    parse_osha_violation_row,
     parse_violation_row,
     resolve_severity,
     resolve_text,
@@ -61,6 +68,17 @@ class TestNormalizingLawStrings:
         assert article_of("性別平等工作法第7條") is None
 
 
+class TestNormalizingLpaLawStrings:
+    """勞退資料的法規字串本身就乾淨（全量掃過只有 9 列頭尾夾雜換行），不需要
+    勞基法那套簡稱／重複尾巴清理，只需去空白。"""
+
+    def test_cleans_whitespace_and_keeps_the_law_string(self):
+        assert normalize_lpa_law("勞工退休金條例第19條第1項") == "勞工退休金條例第19條第1項"
+
+    def test_strips_stray_newlines(self):
+        assert normalize_lpa_law("勞工退休金條例\n第12條第2項") == "勞工退休金條例第12條第2項"
+
+
 class TestParsingAViolationRow:
     """`違法法規法條` 與 `違反法規內容` 是兩串平行的 `;` 分隔字串。"""
 
@@ -92,6 +110,100 @@ class TestParsingAViolationRow:
         row = {"違法法規法條": "勞動基準法第24條", "違反法規內容": "延長工作時間未依規定加給工資", "罰鍰金額": ""}
 
         assert parse_violation_row(row)[0][2] is None
+
+
+class TestParsingALpaViolationRow:
+    """勞退的欄位形狀跟勞基法一樣（`;` 分隔的平行字串），差別只在罰鍰欄位
+    叫「處分金額或滯納金」，且大部分是欠費滯納金不是裁罰。"""
+
+    def test_pairs_up_laws_and_texts_using_the_lpa_fine_column(self):
+        row = {
+            "違法法規法條": "勞工退休金條例第19條第1項",
+            "違反法規內容": "雇主應為適用勞退新制之勞工按月提繳退休金，未依規定按月提繳。",
+            "處分金額或滯納金": "15000",
+        }
+
+        pairs = parse_lpa_violation_row(row)
+
+        assert pairs == [
+            ("勞工退休金條例第19條第1項", "雇主應為適用勞退新制之勞工按月提繳退休金,未依規定按月提繳", 15000),
+        ]
+
+    def test_returns_none_when_law_and_text_counts_disagree(self):
+        row = {
+            "違法法規法條": "勞工退休金條例第12條第1項;勞工退休金條例第12條第2項",
+            "違反法規內容": "雇主未依規定於終止勞動契約後30日內發給勞工退休金",
+            "處分金額或滯納金": "300000",
+        }
+
+        assert parse_lpa_violation_row(row) is None
+
+
+class TestParsingAnOshaLawCitation:
+    """職安的法條欄位常見「子法暨母法」引用（子法授權自母法概括義務條款），
+    使用者決定：視為一筆違規，用子法（較具體的那個引用）代表整列。
+
+    子法一律排在「暨」前面（全量掃過 65,016 個「暨」區段裡 98.4% 如此），
+    唯一例外是母法自己「先引細款、後引概括款」（如「第37條第2項第3款暨
+    第37條第2項」），此時取「暨」前面那個一樣是較具體的那個，規則不用分岔。
+    """
+
+    def test_plain_single_law_citation_passes_through(self):
+        assert parse_osha_law_citation("職業安全衛生法第37條第2項第1款") == "職業安全衛生法第37條第2項第1款"
+
+    def test_takes_the_subordinate_law_before_暨(self):
+        assert (
+            parse_osha_law_citation("營造安全衛生設施標準第19條第1項暨職業安全衛生法第6條第1項")
+            == "營造安全衛生設施標準第19條第1項"
+        )
+
+    def test_takes_the_more_specific_citation_when_both_sides_are_the_base_law(self):
+        assert (
+            parse_osha_law_citation("職業安全衛生法第37條第2項第3款暨職業安全衛生法第37條第2項")
+            == "職業安全衛生法第37條第2項第3款"
+        )
+
+    def test_ignores_everything_after_a_semicolon(self):
+        # 分號後是同一列的其他子違規；列層級判讀只取第一個。
+        assert (
+            parse_osha_law_citation("職業安全衛生法第6條第1項;職業安全衛生設施規則第118條")
+            == "職業安全衛生法第6條第1項"
+        )
+
+    def test_strips_a_leading_list_marker_and_a_line_break(self):
+        # 「1.」「2.」是資料裡混進來的列點標記，不是法條的一部分；換行是另一種
+        # 分隔符，跟分號一樣只取第一段。
+        assert (
+            parse_osha_law_citation("1.營造安全衛生設施標準第129條第09款暨職業安全衛生法第6條第1項第5款\n2.職業安全衛生法第27條第1項第3款")
+            == "營造安全衛生設施標準第129條第09款"
+        )
+
+
+class TestParsingAnOshaViolationRow:
+    """職安走列層級判讀（使用者決定）：一列違規 CSV = 一筆 InterpretedItem，
+    `違反法規內容` 整欄當作這一列的文字，不像勞基法／勞退拆成多筆。"""
+
+    def test_returns_exactly_one_item_using_the_child_law_and_whole_text(self):
+        row = {
+            "違法法規法條": "營造安全衛生設施標準第19條第1項暨職業安全衛生法第6條第1項",
+            "違反法規內容": "對於高度2公尺以上之外牆施工架開口部分等場所作業,未於該處設置護欄、護蓋或安全網等防護設備",
+            "罰鍰金額": "250000",
+        }
+
+        pairs = parse_osha_violation_row(row)
+
+        assert pairs == [
+            (
+                "營造安全衛生設施標準第19條第1項",
+                "對於高度2公尺以上之外牆施工架開口部分等場所作業,未於該處設置護欄、護蓋或安全網等防護設備",
+                250000,
+            ),
+        ]
+
+    def test_missing_fine_becomes_none_not_zero(self):
+        row = {"違法法規法條": "職業安全衛生法第6條第1項", "違反法規內容": "違規描述", "罰鍰金額": ""}
+
+        assert parse_osha_violation_row(row)[0][2] is None
 
 
 class TestResolvingPlainText:
@@ -279,6 +391,116 @@ class TestInterpretingAnEntity:
         assert report.disputed_count == 1
         disputed_items = [i for i in report.items if i.disputed]
         assert len(disputed_items) == 1
+
+
+class TestInterpretingAnEntityAcrossRegimes:
+    """待辦第 8 項：判讀層原本只吃勞基法 CSV，串接勞退／職安後改用 `parse_row`
+    參數挑不同的展開規則，其餘（歸戶、累犯、行政救濟中）邏輯共用不變。"""
+
+    def entity(self, *names):
+        return Entity(key=names[0], key_kind="name", uniform_no=None, names=tuple(names), count=0)
+
+    def write_csv(self, tmp_path, header, rows):
+        path = tmp_path / "violations.csv"
+        with open(path, "w", encoding="utf-8", newline="") as fh:
+            writer = csv.writer(fh)
+            writer.writerow(header)
+            for r in rows:
+                writer.writerow([r.get(h, "") for h in header])
+        return path
+
+    def test_uses_parse_row_to_read_the_lpa_fine_column(self, tmp_path):
+        header = [
+            "主管機關", "公告日期", "處分日期", "處分字號",
+            "事業單位名稱或負責人", "違法法規法條", "違反法規內容",
+            "處分金額或滯納金", "備註說明",
+        ]
+        source = self.write_csv(tmp_path, header, [
+            {"事業單位名稱或負責人": "和德昌股份有限公司", "違法法規法條": "勞工退休金條例第19條第1項",
+             "違反法規內容": "雇主應為適用勞退新制之勞工按月提繳退休金,未依規定按月提繳", "處分金額或滯納金": "15000"},
+        ])
+        entity = self.entity("和德昌股份有限公司")
+
+        report = interpret_entity(
+            entity, source, law_table={}, buckets=[], parse_row=parse_lpa_violation_row,
+        )
+
+        assert len(report.items) == 1
+        assert report.items[0].fine == 15000
+        assert report.items[0].law == "勞工退休金條例第19條第1項"
+
+    def test_uses_parse_row_for_row_level_osha_items(self, tmp_path):
+        header = [
+            "主管機關", "公告日期", "處分日期", "處分字號",
+            "事業單位名稱或負責人", "違法法規法條", "違反法規內容",
+            "罰鍰金額", "備註說明",
+        ]
+        source = self.write_csv(tmp_path, header, [
+            {"事業單位名稱或負責人": "崇雅營造有限公司",
+             "違法法規法條": "營造安全衛生設施標準第19條第1項暨職業安全衛生法第6條第1項",
+             "違反法規內容": "對於高度2公尺以上之屋頂等場所作業,未設置護欄、護蓋或安全網等防護設備",
+             "罰鍰金額": "250000"},
+        ])
+        entity = self.entity("崇雅營造有限公司")
+
+        report = interpret_entity(
+            entity, source, law_table={}, buckets=[], parse_row=parse_osha_violation_row,
+        )
+
+        assert len(report.items) == 1
+        assert report.items[0].law == "營造安全衛生設施標準第19條第1項"
+
+
+class TestBuildingTheLawTableFromData:
+    """勞退／職安沒有像勞基法那樣的人工白話對照表（待辦第 4 項的精神：不強求
+    填表也能跑），嚴重度的罰鍰統計改直接從原始 CSV 算，`plain`／`manual_severity`
+    永遠是 None，全部走 fallback。跟 `scripts/build_law_workbook.py` 一樣，
+    只取「整列只引用這一條」的列計算罰鍰，避免把合併列的罰鍰誤算給某一條。
+    """
+
+    def write_csv(self, tmp_path, rows):
+        path = tmp_path / "violations.csv"
+        header = ["違法法規法條", "違反法規內容", "處分金額或滯納金"]
+        with open(path, "w", encoding="utf-8", newline="") as fh:
+            writer = csv.writer(fh)
+            writer.writerow(header)
+            for r in rows:
+                writer.writerow([r.get(h, "") for h in header])
+        return path
+
+    def test_computes_fine_mean_from_single_law_rows_only(self, tmp_path):
+        source = self.write_csv(tmp_path, [
+            {"違法法規法條": "勞工退休金條例第19條第1項", "違反法規內容": "未依規定按月提繳", "處分金額或滯納金": "10000"},
+            {"違法法規法條": "勞工退休金條例第19條第1項", "違反法規內容": "未依規定按月提繳", "處分金額或滯納金": "30000"},
+            # 合併列：這一列的罰鍰不能確定歸給哪一條，排除在統計之外。
+            {"違法法規法條": "勞工退休金條例第12條第1項;勞工退休金條例第19條第1項",
+             "違反法規內容": "a;b", "處分金額或滯納金": "999999"},
+        ])
+
+        table = build_law_table_from_data(source, parse_row=parse_lpa_violation_row)
+
+        assert table["勞工退休金條例第19條第1項"].fine_mean == 20000
+
+    def test_entries_have_no_manual_fields_so_the_fallback_path_always_runs(self, tmp_path):
+        source = self.write_csv(tmp_path, [
+            {"違法法規法條": "勞工退休金條例第19條第1項", "違反法規內容": "未依規定按月提繳", "處分金額或滯納金": "10000"},
+        ])
+
+        table = build_law_table_from_data(source, parse_row=parse_lpa_violation_row)
+
+        entry = table["勞工退休金條例第19條第1項"]
+        assert entry.plain is None
+        assert entry.manual_severity is None
+
+    def test_laws_with_no_alone_fine_data_still_appear_with_none_mean(self, tmp_path):
+        source = self.write_csv(tmp_path, [
+            {"違法法規法條": "勞工退休金條例第12條第1項;勞工退休金條例第19條第1項",
+             "違反法規內容": "a;b", "處分金額或滯納金": "999999"},
+        ])
+
+        table = build_law_table_from_data(source, parse_row=parse_lpa_violation_row)
+
+        assert table["勞工退休金條例第12條第1項"].fine_mean is None
 
 
 class TestLoadingTheLawTableFromExcel:
