@@ -4,6 +4,33 @@
 
 ---
 
+## [v0.9.0] — 2026-09-14
+
+待辦第 4 項改走漸進式：不再要求填完整份白話對照表才能往下做，判讀層直接用
+fallback 規則先跑起來。
+
+### 新增
+- 新增 `twec/interpret.py`，判讀層：吃 `Roster` 歸戶出的 `Entity`（含所有別名），
+  套上白話對照表的白話與嚴重度，輸出一份違規報告
+  - `load_law_table(xlsx_path)`：讀「條項層（必填）」分頁
+  - `build_severity_buckets(law_table)` / `severity_from_fine`：罰鍰平均切五級分位數
+  - `interpret_entity(entity, raw_csv_path, law_table, buckets)`：一次掃過違規 CSV，
+    用 `Entity.names` 集合比對撈出所有別名的違規列，輸出 `InterpretedReport`
+    （累犯清單、行政救濟中筆數、每筆的白話文字與嚴重度）
+- 新增 `tests/test_interpret.py`，24 個測試（全專案 94 個）
+- 新增 `spike/06_interpret_logic.py` + `spike/06_interpret_tui.py`：判讀層設計原型，
+  互動式 TUI 用真實資料驗證資料流與 CLI 輸出樣式，驗證過的邏輯已移進
+  `twec/interpret.py`，原型檔案保留當原始出處
+
+### 變更
+- **待辦第 4 項不再是阻塞點**：白話缺空時 fallback 用該列自己的官方描述文字，
+  不是表格裡「最常見」的那句；嚴重度缺空時用罰鍰平均自動推算，不強制人工評分
+- 嚴重度的自動推算改用**罰鍰平均而非中位數**：原型實測中位數在這份資料上
+  鑑別力不夠——40 條項裡 27 條中位數都卡在法定最低罰鍰 20,000，quantiles
+  幾乎全部撞在同一格；平均會被累犯/加重情節個案拖高，才切得出五個不同級距
+
+---
+
 ## [v0.8.0] — 2026-08-27
 
 備好待辦第 4 項的填寫用表。程式只整理資料，白話化與嚴重度由人填。
