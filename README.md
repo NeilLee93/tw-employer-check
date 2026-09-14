@@ -121,6 +121,24 @@ len(roster.renamed)
 統編是加值欄位，**不取代 `org`**。勞基法資料裡 79.4% 的事業單位補得上，
 補不上的多為政府機關、公立學校醫院與聯合會計師事務所，名稱字串仍是備援 key。
 
+### 改名候選偵測器
+
+```python
+from twec.rename_candidates import date_ranges, find_candidates
+
+ranges = date_ranges("data/lsa_violations_raw.csv")     # org -> (最早處分日期, 最晚處分日期)
+candidates = find_candidates(roster, ranges)             # 只在殘餘（無統編）雇主之間找
+
+candidates[0].old.display   # 舊名，時間軸較早
+candidates[0].new.display   # 新名，時間軸較晚
+candidates[0].similarity    # 名稱核心的相似度分數
+```
+
+只吃 `roster.entities` 裡 `key_kind == "name"` 的雇主——有可信統編的改名
+已經在 `roster.renamed` 免費拿到，不必再猜。**只能產候選，不能自動合併**：
+時間軸不重疊＋名稱相似不足以證明是同一法人（富利食品／富利餐飲符合這個
+訊號，統編一查卻是兩家法人）。
+
 Windows PowerShell 下載改用：
 
 ```powershell
@@ -144,16 +162,21 @@ tw-employer-check/
 ├── twec/                  正式模組（核心邏輯，不綁 UI）
 │   ├── names.py           事業單位名稱正規化與拆解
 │   ├── uniform_no.py      用財政部稅籍資料補統一編號
-│   └── roster.py          歸戶：把 org 收斂成「一個雇主一列」
+│   ├── roster.py          歸戶：把 org 收斂成「一個雇主一列」
+│   ├── interpret.py       判讀層：套上法條白話與嚴重度
+│   └── rename_candidates.py 改名候選偵測器（殘餘：兩邊都沒可信統編的雇主）
 ├── tests/
 │   ├── test_names.py      twec.names 的行為規格
 │   ├── test_uniform_no.py twec.uniform_no 的行為規格
-│   └── test_roster.py     twec.roster 的行為規格
+│   ├── test_roster.py     twec.roster 的行為規格
+│   ├── test_interpret.py  twec.interpret 的行為規格
+│   └── test_rename_candidates.py twec.rename_candidates 的行為規格
 ├── scripts/
 │   ├── audit_names.py     拿全量資料驗收名稱模組
 │   ├── build_uniform_no.py 全量比對統編，產出對照表
 │   ├── build_roster.py    跑完整條歸戶主流程，產出雇主名冊
-│   └── build_law_workbook.py 產出法條白話化的填寫用 Excel
+│   ├── build_law_workbook.py 產出法條白話化的填寫用 Excel
+│   └── build_rename_candidates.py 跑改名候選偵測，產出候選名單
 ├── data/                  原始 CSV 不進版控，衍生產出進版控
 │   ├── lsa_violations_raw.csv      勞動部原始資料（16.5 MB）
 │   ├── raw/                        其餘 7 個資料集＋財政部稅籍三檔（不進版控）
