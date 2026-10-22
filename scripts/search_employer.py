@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-import csv
 import os
 import sys
 from pathlib import Path
@@ -18,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from twec.interpret import build_severity_buckets, load_law_table, interpret_entity  # noqa: E402
+from twec.cli import load_roster  # noqa: E402
 from twec.roster import Entity  # noqa: E402
 
 ROSTER_PATH = ROOT / "data" / "roster.csv"
@@ -25,23 +25,6 @@ LAW_TABLE_PATH = ROOT / "data" / "勞基法白話對照表.xlsx"
 RAW_CSV_PATH = ROOT / "data" / "lsa_violations_raw.csv"
 
 SEVERITY_DOT = {1: "●", 2: "●●", 3: "●●●", 4: "●●●●", 5: "●●●●●"}
-
-
-def load_roster(path: Path) -> list[Entity]:
-    entities = []
-    with open(path, encoding="utf-8-sig", newline="") as fh:
-        for row in csv.DictReader(fh):
-            others = [n for n in row["其他名稱"].split(";") if n]
-            entities.append(
-                Entity(
-                    key=row["key"],
-                    key_kind=row["key_kind"],
-                    uniform_no=row["uniform_no"] or None,
-                    names=(row["代表名稱"], *others),
-                    count=int(row["裁處次數"]),
-                )
-            )
-    return entities
 
 
 def clear() -> None:
