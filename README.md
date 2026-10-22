@@ -3,7 +3,7 @@
 查詢台灣雇主的勞動法違規紀錄，並用勞動法視角判讀「這代表什麼」。給求職者、人資與勞動法工作者使用。
 
 > **目前狀態：實作起步。** 歸戶主流程（`twec/names.py` → `twec/uniform_no.py` → `twec/roster.py`）
-> 已完整串起來並通過全量驗收，判讀層與 CLI 尚未實作。`spike/` 內為拋棄式驗證腳本，不再維護。
+> 已完整串起來並通過全量驗收；判讀層（勞基法／勞退／職安分軌）與第一版 CLI（`twec search`／`twec report`）已上線。`spike/` 內為拋棄式驗證腳本，不再維護。
 > 驗證結論見 [`可行性調查.md`](可行性調查.md)，進度與待辦見 [`交接文件.md`](交接文件.md)。
 
 ---
@@ -56,6 +56,22 @@ curl -o data/raw/fia_BGMOPEN1Y.csv https://eip.fia.gov.tw/data/BGMOPEN1Y.csv
 
 python scripts/build_uniform_no.py
 ```
+
+### 命令列（CLI）
+
+```bash
+# 前置：data/roster.csv（python scripts/build_roster.py）與各法規原始 CSV
+twec search 麥當勞                 # 找雇主（關鍵字或統編）
+twec report 12411160               # 一個雇主的三法規分軌報告
+twec report 和德昌股份有限公司 --limit 5
+python -m twec report 台鐵         # 未安裝成指令時
+```
+
+`report` 依序以統編、完整名稱（含改名前舊名）、只命中一家的關鍵字找雇主；命中多家會列出候選
+並以 exit code 2 結束，不替你挑。勞基法、勞退、職安各自一個區塊、嚴重度各自分軌，
+彙總只並列筆數、**不加總**（勞退多為欠費滯納金，與勞基法等權相加會扭曲排名）。
+預設讀 `data/lsa_violations_raw.csv`、`data/raw/lpa_勞工退休金條例.csv`、
+`data/raw/osha_職業安全衛生法.csv`，缺檔的法規標「略過」；路徑可用 `--lsa`／`--lpa`／`--osha` 改。
 
 ### 使用名稱正規化模組
 
@@ -164,12 +180,14 @@ tw-employer-check/
 │   ├── uniform_no.py      用財政部稅籍資料補統一編號
 │   ├── roster.py          歸戶：把 org 收斂成「一個雇主一列」
 │   ├── interpret.py       判讀層：套上法條白話與嚴重度
+│   ├── cli.py             命令列進入點（twec search／twec report）
 │   └── rename_candidates.py 改名候選偵測器（殘餘：兩邊都沒可信統編的雇主）
 ├── tests/
 │   ├── test_names.py      twec.names 的行為規格
 │   ├── test_uniform_no.py twec.uniform_no 的行為規格
 │   ├── test_roster.py     twec.roster 的行為規格
 │   ├── test_interpret.py  twec.interpret 的行為規格
+│   ├── test_cli.py        twec.cli 的行為規格
 │   └── test_rename_candidates.py twec.rename_candidates 的行為規格
 ├── scripts/
 │   ├── audit_names.py     拿全量資料驗收名稱模組
